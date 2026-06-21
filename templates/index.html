@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agricultural Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>Agricultural Assistant</h1>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="app-container">
+            <section class="chat-section">
+                <h2 class="section-title">Ask about Farming Issues</h2>
+                <div class="chat-messages" id="chat-messages">
+                    <div class="bot-message">Welcome! I'm your agricultural assistant. Ask me about farming practices, plant diseases, or sustainable agriculture.</div>
+                </div>
+                <div class="typing-indicator" id="typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+                <div class="chat-input">
+                    <input type="text" id="user-input" placeholder="Type your question here..." aria-label="Your message">
+                    <button id="voice-button" title="Voice Input"><i class="fa fa-microphone"></i></button>
+                    <button id="send-button">Send</button>
+                </div>
+            </section>
+
+            <section class="image-section">
+                <h2 class="section-title">Plant Disease Detection</h2>
+                <div class="image-section-content">
+                    <div class="image-upload">
+                        <label for="image-input" class="upload-label">
+                            <span id="upload-text">Upload a leaf image</span>
+                        </label>
+                        <input type="file" id="image-input" accept="image/*">
+                        <p class="upload-info">Upload a clear image of the affected plant leaf for disease detection</p>
+                    </div>
+
+
+
+
+
+                    <button id="capture-btn" class="upload-label" style="margin-top: 10px;">
+                        <i class="fas fa-camera"></i> Capture Image
+                    </button>
+                    <div id="webcam-container" style="display: none; margin-top: 10px;">
+                        <video id="webcam" autoplay playsinline width="300"></video>
+                        <button id="capture-snapshot" class="upload-label" style="margin-top: 10px;">
+                            Take Snapshot
+                        </button>
+                    </div>
+                    <canvas id="canvas" style="display: none;"></canvas>
+
+
+
+
+
+
+
+
+
+                    <div class="image-preview">
+                        <img id="preview-img" alt="Preview of uploaded leaf">
+                        <div class="spinner" id="image-spinner"></div>
+                    </div>
+                    <div class="result-card" id="result-card" style="display: none;">
+                        <h3>Diagnosis Results</h3>
+                        <div class="result-field">
+                            <h4>Plant</h4>
+                            <p id="result-plant">-</p>
+                        </div>
+                        <div class="result-field">
+                            <h4>Disease</h4>
+                            <p id="result-disease">-</p>
+                        </div>
+                        <div class="result-field">
+                            <h4>Description</h4>
+                            <p id="result-description">-</p>
+                        </div>
+                        <div class="result-field">
+                            <h4>Recommended Treatment</h4>
+                            <div id="result-treatment">-</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const chatMessages = document.getElementById('chat-messages');
+            const userInput = document.getElementById('user-input');
+            const sendButton = document.getElementById('send-button');
+            const voiceButton = document.getElementById('voice-button');
+            const typingIndicator = document.getElementById('typing-indicator');
+            const imageInput = document.getElementById('image-input');
+            const previewImg = document.getElementById('preview-img');
+            const uploadText = document.getElementById('upload-text');
+            const imageSpinner = document.getElementById('image-spinner');
+            const resultCard = document.getElementById('result-card');
+            
+            let currentMessageElement = null;
+            let eventSource = null;
+            
+            // Speech recognition setup
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            let recognition = null;
+            
+            if (SpeechRecognition) {
+                recognition = new SpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+                
+                recognition.onresult = function(event) {
+                    const transcript = Array.from(event.results)
+                        .map(result => result[0].transcript)
+                        .join('');
+                    
+                    // Update input field as text is being spoken
+                    userInput.value = transcript;
+                };
+                
+                recognition.onend = function() {
+                    voiceButton.classList.remove('listening');
+                };
+                
+                voiceButton.addEventListener('click', function() {
+                    if (recognition) {
+                        try {
+                            voiceButton.classList.add('listening');
+                            recognition.start();
+                        } catch (e) {
+                            console.error('Recognition error:', e);
+                        }
+                    }
+                });
+            } else {
+                voiceButton.style.display = 'none';
+            }
+            
+            function sendMessage() {
+                const message = userInput.value.trim();
+                if (!message) return;
+                
+                // Add user message to chat
+                const userMessageDiv = document.createElement('div');
+                userMessageDiv.className = 'user-message';
+                userMessageDiv.textContent = message;
+                chatMessages.appendChild(userMessageDiv);
+                
+                userInput.value = '';
+                
+                // Scroll to bottom
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+                
+                // Show typing indicator
+                typingIndicator.style.display = 'block';
+                
+                // If there's an existing connection, close it
+                if (eventSource) {
+                    eventSource.close();
+                }
+                
+                // Create new bot message element
+                currentMessageElement = document.createElement('div');
+                currentMessageElement.className = 'bot-message';
+                currentMessageElement.textContent = ''; // Start with empty content
+                chatMessages.appendChild(currentMessageElement);
+                
+                // First send the query to the backend
+                fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query: message })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === "query received") {
+                        // Start streaming the response
+                        startEventStream(message);
+                    } else {
+                        typingIndicator.style.display = 'none';
+                        currentMessageElement.textContent = data.response || "Sorry, I couldn't process your request.";
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    typingIndicator.style.display = 'none';
+                    currentMessageElement.textContent = "Sorry, there was an error processing your request.";
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                });
+            }
+            
+            function startEventStream(message) {
+                // Create EventSource with the query
+                eventSource = new EventSource(`/stream?query=${encodeURIComponent(message)}`);
+                
+                let responseText = '';
+                
+                eventSource.onmessage = function(event) {
+                    if (event.data === "[DONE]") {
+                        // Stream complete, clean up
+                        eventSource.close();
+                        eventSource = null;
+                        typingIndicator.style.display = 'none';
+                        
+                        // Final formatting with complete text
+                        currentMessageElement.innerHTML = formatChatResponse(responseText);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    } else {
+                        // Append new chunk to response
+                        responseText += event.data;
+                        
+                        // Just update the raw text during streaming - no formatting
+                        currentMessageElement.textContent = responseText;
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    }
+                };
+                
+                eventSource.onerror = function(error) {
+                    console.error('EventSource error:', error);
+                    eventSource.close();
+                    eventSource = null;
+                    typingIndicator.style.display = 'none';
+                    
+                    if (responseText) {
+                        currentMessageElement.innerHTML = formatChatResponse(responseText);
+                    } else {
+                        currentMessageElement.textContent = "Sorry, I couldn't generate a response. Please try again.";
+                    }
+                    
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                };
+            }
+            
+            // Enhanced formatting function to better handle steps and headings
+            function formatChatResponse(text) {
+                if (!text) return '';
+                
+                // Remove any trailing/leading whitespace
+                text = text.trim();
+                
+                // Special handling for "Step X:" format that appears in the example
+                text = text.replace(/(?:^|\n|\<br\>)(Step\s+\d+\s*:)(.+?)(?=\n|$)/gi, 
+                    '<div class="list-item"><strong>$1</strong>$2</div>');
+                
+                // Better handling of capitalized headings followed by text (without colon)
+                text = text.replace(/(?:^|\n|\<br\>)([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,})(?=\n|[A-Z][a-z])/g, '<h3>$1</h3>');
+                
+                // Detect lines ending with colons that are likely introducing lists
+                text = text.replace(/(?:^|\n|\<br\>)([^:]+:)(\s*)(?!\s*<)/g, '<h4>$1</h4>');
+                
+                // Detect natural language headings (capitalized phrases followed by colons)
+                text = text.replace(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+):/g, '<h3>$1</h3>');
+                
+                // Handle sentence breaks for better paragraphs
+                text = text.replace(/(\.)(\s+)([A-Z])/g, '$1<br><br>$3');
+                
+                // Handle bold text with proper line breaks
+                text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                
+                // Process numbered list items - ensuring they appear on their own line
+                // First add line breaks before numbered items if needed
+                text = text.replace(/([^\n])(\s*)(\d+\.\s)/g, '$1<br><br>$3');
+                
+                // Then format the numbered items
+                text = text.replace(/(?:^|\n|\<br\>)(\d+)\.(\s+)([^\n]+)/g, '<div class="list-item"><strong>$1.</strong>$2$3</div>');
+                
+                // Ensure proper spacing between list items
+                text = text.replace(/(<\/div>)(?!\s*<br|\s*$|\s*<\/)/g, '$1<br>');
+                
+                // Handle all bullet point types with consistent formatting
+                text = text.replace(/(?:^|\n|\<br\>)([•\-\+\*])(\s+)([^\n]+)/g, '<li>$3</li>');
+                text = text.replace(/<li>/g, '<ul class="chat-list"><li>');
+                text = text.replace(/<\/li>/g, '</li></ul>');
+                
+                // Fix nested lists by collapsing adjacent ul tags
+                text = text.replace(/<\/ul>\s*<ul class="chat-list">/g, '');
+                
+                // Handle multi-level lists with indentation
+                text = text.replace(/(?:^|\n|\<br\>)\s+([•\-\+\*])(\s+)([^\n]+)/g, '<li class="indented">$3</li>');
+                
+                // Handle line breaks before and after list items
+                text = text.replace(/<\/ul><br>/g, '</ul>');
+                text = text.replace(/<br><ul/g, '<ul');
+                
+                // Better handling of headings - find headings at line starts or after breaks
+                text = text.replace(/(?:^|\n|\<br\>)(#+)(\s+)(.+)/g, function(match, hashes, space, title) {
+                    const level = Math.min(hashes.length, 3);
+                    return `<h${level}>${title}</h${level}>`;
+                });
+                
+                // Fix multiple consecutive br tags
+                text = text.replace(/<br\s*\/?><br\s*\/?>/g, '<br><br>');
+                
+                // Ensure proper spacing around headings
+                text = text.replace(/(<\/h[1-4]>)(?!\s*<br|\s*$|\s*<\/)/g, '$1<br>');
+                text = text.replace(/([^\n])(<h[1-4]>)/g, '$1<br>$2');
+                
+                // Detect transitional lines after lists (instructions that introduce new lists)
+                text = text.replace(/(<\/div>|<\/ul>)(\s*)([^<]+)(:|following|steps|guidelines)/gi, function(match, listEnd, space, content, ending) {
+                    return `${listEnd}<br><strong>${content}${ending}</strong>`;
+                });
+                
+                // Wrap remaining text in paragraph tags if needed
+                const fragments = text.split('<br><br>');
+                const processedFragments = fragments.map(fragment => {
+                    // Skip fragments that are already HTML elements
+                    if (fragment.trim().startsWith('<') && !fragment.trim().startsWith('<br')) {
+                        return fragment;
+                    }
+                    // Skip empty fragments
+                    if (!fragment.trim()) {
+                        return '';
+                    }
+                    return `<p>${fragment}</p>`;
+                });
+                
+                return processedFragments.join('');
+            }
+            
+            // Format disease detection results
+            function formatDiseaseResults(data) {
+                document.getElementById('result-plant').textContent = data.Plant || 'Unknown';
+                document.getElementById('result-disease').textContent = data.Disease || 'Unknown';
+                
+                // Format description
+                const description = document.getElementById('result-description');
+                description.textContent = data.Description || 'No description available';
+                
+                // Format treatment steps with proper bullet points
+                const treatment = document.getElementById('result-treatment');
+                treatment.innerHTML = ''; // Clear previous content
+                
+                if (data["Possible Steps"]) {
+                    const steps = data["Possible Steps"].split('\n');
+                    if (steps.length > 1) {
+                        // Create a list for multiple steps
+                        const ul = document.createElement('ul');
+                        steps.forEach(step => {
+                            if (step.trim()) {
+                                const li = document.createElement('li');
+                                // Remove bullet character if it exists
+                                li.textContent = step.trim().replace(/^[•*-]\s*/, '');
+                                ul.appendChild(li);
+                            }
+                        });
+                        treatment.appendChild(ul);
+                    } else {
+                        // Single item, just show text
+                        treatment.textContent = data["Possible Steps"];
+                    }
+                } else {
+                    treatment.textContent = 'No treatment information available';
+                }
+            }
+            
+            // Image upload preview
+            imageInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        previewImg.src = e.target.result;
+                        previewImg.style.display = 'block';
+                        uploadText.textContent = 'Change image';
+                        
+                        // Hide previous results
+                        resultCard.style.display = 'none';
+                        
+                        // Create form data
+                        const formData = new FormData();
+                        formData.append('image', file);
+                        
+                        // Show loading spinner
+                        imageSpinner.style.display = 'block';
+                        
+                        // Submit to backend
+                        fetch('/image-query', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            // Hide spinner
+                            imageSpinner.style.display = 'none';
+                            
+                            // Display formatted results
+                            formatDiseaseResults(data);
+                            resultCard.style.display = 'block';
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            imageSpinner.style.display = 'none';
+                            alert('There was a problem processing your image. Please try again.');
+                        });
+                    }
+                    reader.readAsDataURL(file);
+                }
+            });
+            
+            // Event listeners
+            sendButton.addEventListener('click', sendMessage);
+            
+            userInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+        });
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
