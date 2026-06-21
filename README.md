@@ -61,7 +61,7 @@ ollama pull nomic-embed-text
 
 # Download trained model weights (CNN, ~88MB)
 # Place full_model.pt in the project root:
-# Download from: <YOUR_HUGGING_FACE_LINK_HERE>
+# Download from: (https://drive.google.com/file/d/1_PXao2QVo344e3Iy32SQFzRNfulmfoZR/view?usp=sharing)
 
 # Run the app
 python app.py
